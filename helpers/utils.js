@@ -349,6 +349,53 @@ const userUtils = {
     }
     return equals;
   },
+  /**
+   * 
+   * @param { Array<User> } users - Arranjo de usuário vindos do .csv
+   * Roda pelo arranjo de usuarios, realiza o parse de cada um deles e os procura na base de dados usando o email
+   * Se já existe um usuário com o email buscado, atualiza as informações dele
+   * Se não existe, insere na base 
+   */
+  async updateUsers(users) {
+    for (user of users) {
+      user = userUtils.parseUser(user)
+      if (user != undefined) {
+        user.customer = true
+        const dbUser = await userUtils.findUser({
+          email: user.email,
+        })
+        // Usuário já existe na base
+        if (dbUser.length != 0) {
+          const savedUser = dbUser[0];
+          // Verifica se os dados mutáveis do usuário (nome, telefone e endereço) foram alterados
+          if (!userUtils.equalUsers(savedUser.toJSON(), user, ['name', 'phone', 'address', 'customer'])) {
+            // Atualiza os campos do usuário com os novos dados vindos do .csv
+            savedUser.name = user.name;
+            savedUser.phone = user.phone;
+            savedUser.address = user.address;
+            savedUser.customer = true
+
+            // Salva o usuário atualizado
+            await savedUser.save((err) => {
+              if (err) console.log('ERRO AO DAR UPDATE');
+              else console.log('UPDATE FEITO COM SUCESSO');
+            });
+          } else {
+            // Caso nenhum dos dados tenha sido atualizado, não faz nada e segue para a próxima iteração
+            console.log('SEM DADOS A SEREM ATUALIZADOS');
+          }
+        } else {
+          // Insere usuário na base
+          userUtils.signUp(user, (err) => {
+            if (err) console.log('ERRO SALVANDO')
+            else console.log('Usuário salvo com sucesso')
+          })
+        }
+      } else {
+        console.log('DADOS DO USUÁRIO ESTÃO NO FORMATO INVÁLIDO')
+      }
+    }
+  },
 }
 
 const orderUtils = {
@@ -362,10 +409,22 @@ const orderUtils = {
         const prod = await Product.findOne({ _id: product.id }).lean();
         delete prod._id;
         delete prod.__v;
+        prod.quantity = product.quantity;
         formattedProducts.push(prod);
       }
       const payment_method = await PaymentMethod.findOne({ _id: order.payment_method_id }).lean();
       const client = await User.findOne({ _id: order.user_id }).lean();
+      console.log(order)
+      let vendor = undefined
+      if (order.vendor_id != undefined) {
+        vendor = await User.findOne({ _id: order.vendor_id }).lean();
+        delete vendor._id;
+        delete vendor.__v;
+        delete vendor.password;
+        delete vendor.customer;
+        delete vendor.createdAt;
+        delete vendor.updatedAt;
+      }
 
       delete client._id;
       delete client.__v;
@@ -381,8 +440,9 @@ const orderUtils = {
         order_date,
         products: formattedProducts,
         client,
-        status
+        status,
       }
+      if (vendor != undefined) newOrder.vendor = vendor;
       formattedOrders.push(newOrder);
     }
     return formattedOrders;

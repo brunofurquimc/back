@@ -1,6 +1,10 @@
 var express = require('express');
 var router = express.Router();
 
+const { isEqual } = require('lodash');
+const path = require('path')
+
+
 /**
  * Importa funções auxiliares da pasta helpers
  */
@@ -10,7 +14,12 @@ const { validateEstablishmentSignUp } = require('../helpers/validate');
 const Establishment = require('../models/establishment.js');
 
 /**
- * Requisição para adicionar um único estabelecimento na base
+ * Requisição para adicionar um único usuário na base, em vez de adicionar vários de uma vez
+ * como é feito no método acima (updateFromFile)
+ * 
+ * Caso já exista na base, não atualiza as informações.
+ * 
+ * Recebe no payload da requisição todos os dados descritos no modelo USER
  * 
  */
 router.post('/signup', async function (req, res, next) {
