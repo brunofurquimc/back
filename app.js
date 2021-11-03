@@ -13,6 +13,7 @@ var usersRouter = require('./routes/users');
 var productsRouter = require('./routes/products');
 var reportsRouter = require('./routes/reports');
 var establishmentRouter = require('./routes/establishments');
+var ordersRouter = require('./routes/orders')
 var listsRouter = require('./routes/lists');
 
 var app = express();
@@ -29,6 +30,7 @@ app.use(cors({
 
 app.use('/', indexRouter);
 app.use('/users', usersRouter);
+app.use('/orders', ordersRouter);
 app.use('/reports', reportsRouter);
 app.use('/products', productsRouter);
 app.use('/establishments', establishmentRouter);

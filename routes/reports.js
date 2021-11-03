@@ -8,6 +8,7 @@ const User = require('../models/user.js');
 const Order = require('../models/order.js');
 const Product = require('../models/product');
 const PaymentMethod = require('../models/payment_method');
+const Establishment = require('../models/establishment');
 
 const { formatAddress, formatPhone, findUser, getBrazilianDate, findProduct, findOrder, validateAuth } = require('../helpers/utils');
 const { validateUpdateFromFile } = require('../helpers/validate');
@@ -69,6 +70,94 @@ function getFavoriteProduct(orders) {
     count: max,
   }
 }
+
+router.post('/orders/filter', async function (req, res, next) {
+  if (!validateAuth(req.headers.authorization)) {
+    res.status(403).send({
+      error: true,
+      message: 'Usuário não está autenticado'
+    })
+  }
+  let orders;
+  let user_id = req.headers.authorization;
+
+  let vendor = await User.findOne({ _id: user_id }).lean();
+
+  let query = {
+    establishment_id: vendor.establishment_id,
+  }
+
+  if (req.body.date !== undefined && req.body.date.length == 2) {
+    query.order_date = {
+      $gte: req.body.date[0],
+      $lte: req.body.date[1],
+    }
+  }
+
+  const products = await Product.find({}).lean()
+  console.log(products)
+  const productsCount = products.length;
+
+  let totalValueSold = 0;
+  let totalCost = 0;
+  orders = await Order.find(query).sort({ order_date: 'asc' }).lean();
+
+  const ordersCount = orders.length;
+
+  let preferredPaymentMethods = {}
+
+  for (const order of orders) {
+    if (preferredPaymentMethods[order.payment_method_id] === undefined) {
+      preferredPaymentMethods[order.payment_method_id] = 1
+    } else preferredPaymentMethods[order.payment_method_id] += 1;
+
+    for (const orderProduct of order.products) {
+      let product = products.find(p => isEqual(p._id, orderProduct.id));
+      totalValueSold += orderProduct.quantity * product.value;
+      totalCost += orderProduct.quantity * product.cost;
+    }
+  }
+
+  console.log(totalValueSold, totalCost)
+
+  let max = Number.NEGATIVE_INFINITY;
+  let maxKey = undefined;
+  console.log(max, maxKey, preferredPaymentMethods)
+  for (const [key, value] of Object.entries(preferredPaymentMethods)) {
+    console.log(key, value)
+    if (value > max) {
+      max = value;
+      maxKey = key;
+    }
+  }
+
+  let preferredPaymentMethod;
+  if (maxKey !== undefined) {
+    preferredPaymentMethod = await PaymentMethod.findOne({ _id: maxKey }).lean();
+  }
+
+  let favoriteProductInfo = getFavoriteProduct(orders);
+  let favoriteProduct;
+  if (typeof favoriteProductInfo.id != 'undefined') {
+    const prod = await Product.find({ _id: favoriteProductInfo.id });
+    if (prod.length != 0) {
+      favoriteProduct = {
+        name: prod[0].name,
+        quantity: favoriteProductInfo.count,
+      }
+    }
+  }
+  console.log(preferredPaymentMethod)
+  return res.status(200).send({
+    orders,
+    paymentMethod: preferredPaymentMethod !== undefined ? preferredPaymentMethod.name : '',
+    totalValueSold,
+    totalCost,
+    productsCount,
+    ordersCount,
+    favoriteProduct: favoriteProduct !== undefined ? favoriteProduct.name : ''
+  })
+})
 
 router.post('/orders/info', async function (req, res, next) {
   if (!validateAuth(req.headers.authorization)) {
