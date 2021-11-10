@@ -9,6 +9,7 @@ const Order = require('../models/order.js');
 const Product = require('../models/product');
 const PaymentMethod = require('../models/payment_method');
 const Establishment = require('../models/establishment');
+const Status = require('../models/status.js');
 
 const { formatAddress, formatPhone, findUser, getBrazilianDate, findProduct, findOrder, validateAuth } = require('../helpers/utils');
 const { validateUpdateFromFile } = require('../helpers/validate');
@@ -362,11 +363,178 @@ router.post('/orders', async function (req, res, next) {
   return;
 });
 
-router.post('/products', async function (req, res, next) {
-  const fileName = req.body.file_name
-  if (typeof fileName != 'undefined') delete req.body.file_name
+router.post('/clients', async function (req, res, next) {
+  if (!validateAuth(req.headers.authorization)) {
+    res.status(403).send({
+      error: true,
+      message: 'Usuário não está autenticado'
+    })
+  }
+  const vendor = await User.findOne({ _id: req.headers.authorization }).lean()
+  const { establishment_id } = vendor;
 
-  let products = await findProduct();
+  const clients = await User.find({ establishment_id, customer: true }).lean()
+
+  const fileName = 'RelatorioClientes.csv';
+  
+  const clientsArray = [];
+  for (const client of clients) {
+    const clientOrders = await Order.find({ user_id: client._id }).lean()
+    const favProdInfo = getFavoriteProduct(clientOrders);
+    let favoriteProduct = ''
+    if (favProdInfo.id != undefined) {
+      const prod = await Product.findOne({ _id: favProdInfo.id }).lean();
+      if (prod != undefined ) favoriteProduct = `${prod.name} (x${favProdInfo.count})`
+    }
+    const obj = {
+      signUp_date: getBrazilianDate(client.createdAt),
+      email: client.email,
+      name: client.name,
+      id: client._id,
+      phone: formatPhone(client.phone),
+      address: formatAddress(client.address),
+      order_count: clientOrders.length,
+      favoriteProduct,
+    }
+
+    clientsArray.push(obj)
+  }
+  var fields = [
+    {
+      label: 'Identificador',
+      value: 'id',
+    },
+    {
+      label: 'Data de cadastro',
+      value: 'signUp_date',
+    },
+    {
+      label: 'Nome',
+      value: 'name'
+    },
+    {
+      label: 'E-mail',
+      value: 'email'
+    },
+    {
+      label: 'Celular',
+      value: 'phone'
+    },
+    {
+      label: 'Endereço de entrega',
+      value: 'address'
+    },
+    {
+      label: 'Número de compras',
+      value: 'order_count'
+    },
+    {
+      label: 'Produto mais pedido',
+      value: 'favoriteProduct',
+    }
+  ];
+
+
+  const json2csvParser = new Parser({ fields });
+  var data = json2csvParser.parse(clientsArray);
+  res.attachment(fileName).send(data);
+  return;
+});
+
+router.post('/sales', async function (req, res, next) {
+  if (!validateAuth(req.headers.authorization)) {
+    res.status(403).send({
+      error: true,
+      message: 'Usuário não está autenticado'
+    })
+  }
+  const vendor = await User.findOne({ _id: req.headers.authorization }).lean()
+  const { establishment_id } = vendor;
+
+  const orders = await Order.find({ establishment_id }).lean()
+
+  const fileName = 'RelatorioVendas.csv';
+  
+  const ordersArray = [];
+  for (const order of orders) {
+    const status = await Status.findOne({ _id: order.status }).lean();
+    const user = await User.findOne({ _id: order.user_id }).lean();
+    const paymentMethod = await PaymentMethod.findOne({ _id: order.payment_method_id }).lean();
+    let productsString = '';
+
+    for (const product of order.products) {
+      const prod = await Product.findOne({ _id: product.id }).lean();
+      productsString += `${prod.name} (${valorFormatter.format(prod.value)} X ${product.quantity}); `
+    }
+    const obj = {
+      value: valorFormatter.format(order.value),
+      status: status.value,
+      consumerName: user.name,
+      consumerPhone: formatPhone(user.phone),
+      productCount: order.products.length,
+      paymentMethod: paymentMethod.name,
+      order_date: getBrazilianDate(order.order_date),
+      products: productsString,
+    }
+
+    ordersArray.push(obj);
+  }
+  var fields = [
+    {
+      label: 'Data de cadastro',
+      value: 'order_date',
+    },
+    {
+      label: 'Valor',
+      value: 'value'
+    },
+    {
+      label: 'Status',
+      value: 'status'
+    },
+    {
+      label: 'Nome do cliente',
+      value: 'consumerName'
+    },
+    {
+      label: 'Celular do cliente',
+      value: 'consumerPhone'
+    },
+    {
+      label: 'Método de pagamento',
+      value: 'paymentMethod'
+    },
+    {
+      label: 'Número de produtos',
+      value: 'productCount',
+    },
+    {
+      label: 'Descrição dos produtos',
+      value: 'products',
+    }
+  ];
+
+
+  const json2csvParser = new Parser({ fields });
+  var data = json2csvParser.parse(ordersArray);
+  res.attachment(fileName).send(data);
+  return;
+});
+
+router.post('/products', async function (req, res, next) {
+  if (!validateAuth(req.headers.authorization)) {
+    res.status(403).send({
+      error: true,
+      message: 'Usuário não está autenticado'
+    })
+  }
+  const vendor = await User.findOne({ _id: req.headers.authorization }).lean()
+  const { establishment_id } = vendor;
+
+  const products = await Product.find({ establishment_id }).lean()
+
+  const fileName = 'RelatorioProdutos.csv';
+
   const productsArray = [];
   for (const product of products) {
     const obj = {
@@ -415,7 +583,7 @@ router.post('/products', async function (req, res, next) {
 
   const json2csvParser = new Parser({ fields });
   var data = json2csvParser.parse(productsArray);
-  res.attachment(typeof fileName != 'undefined' ? `${fileName}.csv` : 'products.csv').send(data);
+  res.attachment(fileName).send(data);
   return;
 });
 
@@ -499,6 +667,21 @@ router.get('/users', async function (req, res, next) {
   res.send(data);
   return;
 });
+
+router.get('/establishment', async function (req, res) {
+  if (!validateAuth(req.headers.authorization)) {
+    res.status(403).send({
+      error: true,
+      message: 'Usuário não está autenticado'
+    })
+  }
+  const vendor = await User.findOne({ _id: req.headers.authorization }).lean()
+  const { establishment_id } = vendor;
+
+  const products = await Product.find({ establishment_id }).lean()
+
+  const fileName = 'RelatorioOperacao.csv'
+})
 module.exports = router;
 
 
